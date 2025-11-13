@@ -34,6 +34,40 @@ async function run() {
     const eventsCollection = database.collection("events");
 
   }
+
+  // GET all challenges with advanced filtering
+    app.get('/api/challenges', async (req, res) => {
+      try {
+        const { category, startDate, endDate, minParticipants, maxParticipants } = req.query;
+        
+        let filter = {};
+        
+        // Category filter using $in
+        if (category) {
+          const categories = category.split(',');
+          filter.category = { $in: categories };
+        }
+        
+        // Date range filtering
+        if (startDate || endDate) {
+          filter.startDate = {};
+          if (startDate) filter.startDate.$gte = new Date(startDate);
+          if (endDate) filter.startDate.$lte = new Date(endDate);
+        }
+        
+        // Participants range filtering
+        if (minParticipants || maxParticipants) {
+          filter.participants = {};
+          if (minParticipants) filter.participants.$gte = parseInt(minParticipants);
+          if (maxParticipants) filter.participants.$lte = parseInt(maxParticipants);
+        }
+        
+        const challenges = await challengesCollection.find(filter).toArray();
+        res.json(challenges);
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
   
 }
 
