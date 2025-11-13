@@ -98,6 +98,43 @@ async function run() {
         res.status(500).json({ message: error.message });
       }
     });
+
+
+    // PATCH update challenge
+    app.patch('/api/challenges/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updateData = { ...req.body, updatedAt: new Date() };
+        delete updateData._id;
+        
+        const result = await challengesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData }
+        );
+        
+        if (result.matchedCount === 0) {
+          return res.status(404).json({ message: 'Challenge not found' });
+        }
+        
+        res.json({ message: 'Challenge updated successfully' });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+     // DELETE challenge
+    app.delete('/api/challenges/:id', async (req, res) => {
+      try {
+        const result = await challengesCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: 'Challenge not found' });
+        }
+        res.json({ message: 'Challenge deleted successfully' });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
   
 }
 
