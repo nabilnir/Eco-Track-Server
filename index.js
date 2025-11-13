@@ -20,7 +20,26 @@ const client = new MongoClient(uri, {
   }
 });
 
+async function run() {
+
+  try{
+
+    await client.connect();
+    console.log("Connected to MongoDB!");
+
+    const database = client.db("ecoTrackDB");
+    const challengesCollection = database.collection("challenges");
+    const userChallengesCollection = database.collection("userChallenges");
+    const tipsCollection = database.collection("tips");
+    const eventsCollection = database.collection("events");
+
+  }
+  
+}
+
 run().catch(console.dir);
+
+
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
