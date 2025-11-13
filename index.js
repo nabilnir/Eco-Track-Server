@@ -35,7 +35,7 @@ async function run() {
 
   }
 
-  // GET all challenges with advanced filtering
+  // advanced filtering
     app.get('/api/challenges', async (req, res) => {
       try {
         const { category, startDate, endDate, minParticipants, maxParticipants } = req.query;
@@ -64,6 +64,36 @@ async function run() {
         
         const challenges = await challengesCollection.find(filter).toArray();
         res.json(challenges);
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    // GET single challenge
+    app.get('/api/challenges/:id', async (req, res) => {
+      try {
+        const challenge = await challengesCollection.findOne({ _id: new ObjectId(req.params.id) });
+        if (!challenge) {
+          return res.status(404).json({ message: 'Challenge not found' });
+        }
+        res.json(challenge);
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+
+    // POST create new challenge
+    app.post('/api/challenges', async (req, res) => {
+      try {
+        const newChallenge = {
+          ...req.body,
+          participants: 0,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        const result = await challengesCollection.insertOne(newChallenge);
+        res.status(201).json({ insertedId: result.insertedId, ...newChallenge });
       } catch (error) {
         res.status(500).json({ message: error.message });
       }
