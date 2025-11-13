@@ -175,6 +175,49 @@ async function run() {
         res.status(500).json({ message: error.message });
       }
     });
+
+
+    // GET user's challenges
+    app.get('/api/user-challenges/:userId', async (req, res) => {
+      try {
+        const { userId } = req.params;
+        const userChallenges = await userChallengesCollection.find({ userId }).toArray();
+        
+        // Populate challenge details
+        const challengesWithDetails = await Promise.all(
+          userChallenges.map(async (uc) => {
+            const challenge = await challengesCollection.findOne({ _id: uc.challengeId });
+            return { ...uc, challenge };
+          })
+        );
+        
+        res.json(challengesWithDetails);
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+
+    // PATCH update user challenge progress
+    app.patch('/api/user-challenges/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { progress, status } = req.body;
+        
+        const result = await userChallengesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { progress, status, updatedAt: new Date() } }
+        );
+        
+        if (result.matchedCount === 0) {
+          return res.status(404).json({ message: 'User challenge not found' });
+        }
+        
+        res.json({ message: 'Progress updated successfully' });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
   
 }
 
