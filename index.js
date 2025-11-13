@@ -33,9 +33,9 @@ async function run() {
     const tipsCollection = database.collection("tips");
     const eventsCollection = database.collection("events");
 
-  }
 
-  // advanced filtering
+
+    // advanced filtering
     app.get('/api/challenges', async (req, res) => {
       try {
         const { category, startDate, endDate, minParticipants, maxParticipants } = req.query;
@@ -219,6 +219,59 @@ async function run() {
       }
     });
   
+
+    // ============ TIPS ROUTES ============
+    
+    app.get('/api/tips', async (req, res) => {
+      try {
+        const tips = await tipsCollection.find().sort({ createdAt: -1 }).limit(5).toArray();
+        res.json(tips);
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    // ============ EVENTS ROUTES ============
+    
+    app.get('/api/events', async (req, res) => {
+      try {
+        const events = await eventsCollection.find({ date: { $gte: new Date() } }).sort({ date: 1 }).limit(4).toArray();
+        res.json(events);
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    // ============ STATISTICS ROUTE ============
+    
+    app.get('/api/statistics', async (req, res) => {
+      try {
+        const totalChallenges = await challengesCollection.countDocuments();
+        const totalParticipants = await challengesCollection.aggregate([
+          { $group: { _id: null, total: { $sum: "$participants" } } }
+        ]).toArray();
+        
+        res.json({
+          totalChallenges,
+          totalParticipants: totalParticipants[0]?.total || 0,
+          co2Saved: Math.floor(Math.random() * 5000) + 10000, 
+          plasticReduced: Math.floor(Math.random() * 2000) + 5000 
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    // Root route
+    app.get('/', (req, res) => {
+      res.send('EcoTrack API is running!');
+    });
+
+  } catch (error) {
+    console.error('MongoDB connection error:', error);
+  }
+
+
 }
 
 run().catch(console.dir);
