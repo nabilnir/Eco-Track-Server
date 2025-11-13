@@ -135,6 +135,46 @@ async function run() {
       }
     });
 
+
+
+    // POST join challenge
+    app.post('/api/challenges/join/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { userId } = req.body;
+
+        // Check if already joined
+        const existing = await userChallengesCollection.findOne({
+          userId: userId,
+          challengeId: new ObjectId(id)
+        });
+
+        if (existing) {
+          return res.status(400).json({ message: 'Already joined this challenge' });
+        }
+
+        // Create user challenge entry
+        const userChallenge = {
+          userId: userId,
+          challengeId: new ObjectId(id),
+          status: 'Not Started',
+          progress: 0,
+          joinDate: new Date()
+        };
+
+        await userChallengesCollection.insertOne(userChallenge);
+
+        // Increment participants count
+        await challengesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $inc: { participants: 1 } }
+        );
+
+        res.status(201).json({ message: 'Successfully joined challenge', userChallenge });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
   
 }
 
