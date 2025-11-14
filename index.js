@@ -21,9 +21,7 @@ const client = new MongoClient(uri, {
 });
 
 async function run() {
-
-  try{
-
+  try {
     await client.connect();
     console.log("Connected to MongoDB!");
 
@@ -33,9 +31,9 @@ async function run() {
     const tipsCollection = database.collection("tips");
     const eventsCollection = database.collection("events");
 
-
-
-    // advanced filtering
+    // CHALLENGES ROUTES 
+    
+    // GET all challenges with advanced filtering
     app.get('/api/challenges', async (req, res) => {
       try {
         const { category, startDate, endDate, minParticipants, maxParticipants } = req.query;
@@ -82,7 +80,6 @@ async function run() {
       }
     });
 
-
     // POST create new challenge
     app.post('/api/challenges', async (req, res) => {
       try {
@@ -98,7 +95,6 @@ async function run() {
         res.status(500).json({ message: error.message });
       }
     });
-
 
     // PATCH update challenge
     app.patch('/api/challenges/:id', async (req, res) => {
@@ -122,7 +118,7 @@ async function run() {
       }
     });
 
-     // DELETE challenge
+    // DELETE challenge
     app.delete('/api/challenges/:id', async (req, res) => {
       try {
         const result = await challengesCollection.deleteOne({ _id: new ObjectId(req.params.id) });
@@ -134,8 +130,6 @@ async function run() {
         res.status(500).json({ message: error.message });
       }
     });
-
-
 
     // POST join challenge
     app.post('/api/challenges/join/:id', async (req, res) => {
@@ -176,7 +170,8 @@ async function run() {
       }
     });
 
-
+    // USER CHALLENGES ROUTES 
+    
     // GET user's challenges
     app.get('/api/user-challenges/:userId', async (req, res) => {
       try {
@@ -196,7 +191,6 @@ async function run() {
         res.status(500).json({ message: error.message });
       }
     });
-
 
     // PATCH update user challenge progress
     app.patch('/api/user-challenges/:id', async (req, res) => {
@@ -218,9 +212,8 @@ async function run() {
         res.status(500).json({ message: error.message });
       }
     });
-  
 
-    // TIPS ROUTES
+    //  TIPS ROUTES 
     
     app.get('/api/tips', async (req, res) => {
       try {
@@ -231,7 +224,6 @@ async function run() {
       }
     });
 
-    // POST create 
     app.post('/api/tips', async (req, res) => {
       try {
         const newTip = {
@@ -257,30 +249,22 @@ async function run() {
       }
     });
 
-    // STATISTICS ROUTE 
-    
-    app.get('/api/statistics', async (req, res) => {
+    // POST create new event 
+    app.post('/api/events', async (req, res) => {
       try {
-        const totalChallenges = await challengesCollection.countDocuments();
-        const totalParticipants = await challengesCollection.aggregate([
-          { $group: { _id: null, total: { $sum: "$participants" } } }
-        ]).toArray();
-        
-        res.json({
-          totalChallenges,
-          totalParticipants: totalParticipants[0]?.total || 0,
-          co2Saved: Math.floor(Math.random() * 5000) + 10000, 
-          plasticReduced: Math.floor(Math.random() * 2000) + 5000 
-        });
+        const newEvent = {
+          ...req.body,
+          attendees: req.body.attendees ?? 0,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        const result = await eventsCollection.insertOne(newEvent);
+        res.status(201).json({ insertedId: result.insertedId, ...newEvent });
       } catch (error) {
         res.status(500).json({ message: error.message });
       }
     });
 
-    // Root route
-    app.get('/', (req, res) => {
-      res.send('EcoTrack API is running!');
-    });
 
     // SLIDES ROUTES
     app.get('/slides', async (req, res) => {
@@ -301,11 +285,145 @@ async function run() {
       }
     });
 
+    
+
+    //  STATISTICS ROUTE
+    
+    app.get('/api/statistics', async (req, res) => {
+      try {
+      
+        const totalChallenges = await challengesCollection.countDocuments();
+        
+        
+        const totalParticipants = await challengesCollection.aggregate([
+          { $group: { _id: null, total: { $sum: "$participants" } } }
+        ]).toArray();
+        
+        
+        const totalUserChallenges = await userChallengesCollection.countDocuments();
+        
+       
+        const co2Challenges = await userChallengesCollection.aggregate([
+          {
+            $lookup: {
+              from: 'challenges',
+              localField: 'challengeId',
+              foreignField: '_id',
+              as: 'challenge'
+            }
+          },
+          { $unwind: '$challenge' },
+          {
+            $match: {
+              'challenge.category': { $in: ['Energy Conservation', 'Sustainable Transport'] },
+              status: 'Finished'
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: { $multiply: ['$progress', '$challenge.duration'] } }
+            }
+          }
+        ]).toArray();
+        
+        
+        const plasticChallenges = await userChallengesCollection.aggregate([
+          {
+            $lookup: {
+              from: 'challenges',
+              localField: 'challengeId',
+              foreignField: '_id',
+              as: 'challenge'
+            }
+          },
+          { $unwind: '$challenge' },
+          {
+            $match: {
+              'challenge.category': 'Waste Reduction',
+              status: 'Finished'
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: { $multiply: ['$progress', '$challenge.duration'] } }
+            }
+          }
+        ]).toArray();
+        
+        
+        const waterChallenges = await userChallengesCollection.aggregate([
+          {
+            $lookup: {
+              from: 'challenges',
+              localField: 'challengeId',
+              foreignField: '_id',
+              as: 'challenge'
+            }
+          },
+          { $unwind: '$challenge' },
+          {
+            $match: {
+              'challenge.category': 'Water Conservation',
+              status: 'Finished'
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: { $multiply: ['$progress', '$challenge.duration'] } }
+            }
+          }
+        ]).toArray();
+        
+        
+        const treesChallenges = await userChallengesCollection.aggregate([
+          {
+            $lookup: {
+              from: 'challenges',
+              localField: 'challengeId',
+              foreignField: '_id',
+              as: 'challenge'
+            }
+          },
+          { $unwind: '$challenge' },
+          {
+            $match: {
+              'challenge.category': 'Green Living',
+              status: 'Finished'
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: { $multiply: ['$progress', 0.1] } }
+            }
+          }
+        ]).toArray();
+        
+        res.json({
+          totalChallenges,
+          totalParticipants: totalParticipants[0]?.total || 0,
+          totalUserChallenges,
+          co2Saved: Math.floor((co2Challenges[0]?.total || 0) * 2.5), 
+          plasticReduced: Math.floor((plasticChallenges[0]?.total || 0) * 1.8), 
+          waterSaved: Math.floor((waterChallenges[0]?.total || 0) * 150), 
+          treesPlanted: Math.floor(treesChallenges[0]?.total || 0) 
+        });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    // Root route
+    app.get('/', (req, res) => {
+      res.send('EcoTrack API is running!');
+    });
+
   } catch (error) {
     console.error('MongoDB connection error:', error);
   }
-
-
 }
 
 run().catch(console.dir);
