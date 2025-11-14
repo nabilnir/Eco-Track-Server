@@ -220,7 +220,7 @@ async function run() {
     });
   
 
-    // ============ TIPS ROUTES ============
+    // TIPS ROUTES
     
     app.get('/api/tips', async (req, res) => {
       try {
@@ -231,7 +231,22 @@ async function run() {
       }
     });
 
-    // ============ EVENTS ROUTES ============
+    // POST create 
+    app.post('/api/tips', async (req, res) => {
+      try {
+        const newTip = {
+          ...req.body,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        const result = await tipsCollection.insertOne(newTip);
+        res.status(201).json({ insertedId: result.insertedId, ...newTip });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    // EVENTS ROUTES 
     
     app.get('/api/events', async (req, res) => {
       try {
@@ -242,7 +257,7 @@ async function run() {
       }
     });
 
-    // ============ STATISTICS ROUTE ============
+    // STATISTICS ROUTE 
     
     app.get('/api/statistics', async (req, res) => {
       try {
@@ -267,6 +282,25 @@ async function run() {
       res.send('EcoTrack API is running!');
     });
 
+    // SLIDES ROUTES
+    app.get('/slides', async (req, res) => {
+      try {
+        const slides = await database.collection('slides').find({}).toArray();
+        res.json(slides);
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    app.post('/slides', async (req, res) => {
+      try {
+        const result = await database.collection('slides').insertOne(req.body);
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
   } catch (error) {
     console.error('MongoDB connection error:', error);
   }
@@ -275,8 +309,6 @@ async function run() {
 }
 
 run().catch(console.dir);
-
-
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
