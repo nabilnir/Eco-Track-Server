@@ -12,6 +12,7 @@ app.use(express.json());
 
 // MongoDB Connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@ecotrack0.zoz8wuc.mongodb.net/?appName=EcoTrack0`;
+
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -32,34 +33,34 @@ async function run() {
     const eventsCollection = database.collection("events");
 
     // CHALLENGES ROUTES 
-    
-    // GET all challenges with advanced filtering
+
+    //  all challenges with (advance filtering)
     app.get('/api/challenges', async (req, res) => {
       try {
         const { category, startDate, endDate, minParticipants, maxParticipants } = req.query;
-        
+
         let filter = {};
-        
+
         // Category filter using $in
         if (category) {
           const categories = category.split(',');
           filter.category = { $in: categories };
         }
-        
+
         // Date range filtering
         if (startDate || endDate) {
           filter.startDate = {};
           if (startDate) filter.startDate.$gte = new Date(startDate);
           if (endDate) filter.startDate.$lte = new Date(endDate);
         }
-        
+
         // Participants range filtering
         if (minParticipants || maxParticipants) {
           filter.participants = {};
           if (minParticipants) filter.participants.$gte = parseInt(minParticipants);
           if (maxParticipants) filter.participants.$lte = parseInt(maxParticipants);
         }
-        
+
         const challenges = await challengesCollection.find(filter).toArray();
         res.json(challenges);
       } catch (error) {
@@ -102,16 +103,16 @@ async function run() {
         const { id } = req.params;
         const updateData = { ...req.body, updatedAt: new Date() };
         delete updateData._id;
-        
+
         const result = await challengesCollection.updateOne(
           { _id: new ObjectId(id) },
           { $set: updateData }
         );
-        
+
         if (result.matchedCount === 0) {
           return res.status(404).json({ message: 'Challenge not found' });
         }
-        
+
         res.json({ message: 'Challenge updated successfully' });
       } catch (error) {
         res.status(500).json({ message: error.message });
@@ -171,13 +172,13 @@ async function run() {
     });
 
     // USER CHALLENGES ROUTES 
-    
+
     // GET user's challenges
     app.get('/api/user-challenges/:userId', async (req, res) => {
       try {
         const { userId } = req.params;
         const userChallenges = await userChallengesCollection.find({ userId }).toArray();
-        
+
         // Populate challenge details
         const challengesWithDetails = await Promise.all(
           userChallenges.map(async (uc) => {
@@ -185,7 +186,7 @@ async function run() {
             return { ...uc, challenge };
           })
         );
-        
+
         res.json(challengesWithDetails);
       } catch (error) {
         res.status(500).json({ message: error.message });
@@ -197,16 +198,16 @@ async function run() {
       try {
         const { id } = req.params;
         const { progress, status } = req.body;
-        
+
         const result = await userChallengesCollection.updateOne(
           { _id: new ObjectId(id) },
           { $set: { progress, status, updatedAt: new Date() } }
         );
-        
+
         if (result.matchedCount === 0) {
           return res.status(404).json({ message: 'User challenge not found' });
         }
-        
+
         res.json({ message: 'Progress updated successfully' });
       } catch (error) {
         res.status(500).json({ message: error.message });
@@ -214,7 +215,7 @@ async function run() {
     });
 
     //  TIPS ROUTES 
-    
+
     app.get('/api/tips', async (req, res) => {
       try {
         const tips = await tipsCollection.find().sort({ createdAt: -1 }).limit(5).toArray();
@@ -239,10 +240,10 @@ async function run() {
     });
 
     // EVENTS ROUTES 
-    
+
     app.get('/api/events', async (req, res) => {
       try {
-        const events = await eventsCollection.find({ date: { $gte: new Date() } }).sort({ date: 1 }).limit(4).toArray();
+        const events = await eventsCollection.find().sort({ date: 1 }).limit(4).toArray();
         res.json(events);
       } catch (error) {
         res.status(500).json({ message: error.message });
@@ -260,6 +261,77 @@ async function run() {
         };
         const result = await eventsCollection.insertOne(newEvent);
         res.status(201).json({ insertedId: result.insertedId, ...newEvent });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    // GET single event
+    app.get('/api/events/:id', async (req, res) => {
+      try {
+        const event = await eventsCollection.findOne({ _id: new ObjectId(req.params.id) });
+        if (!event) {
+          return res.status(404).json({ message: 'Event not found' });
+        }
+        res.json(event);
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    // PATCH update event
+    app.patch('/api/events/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updateData = { ...req.body, updatedAt: new Date() };
+        delete updateData._id;
+        
+        const result = await eventsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData }
+        );
+        
+        if (result.matchedCount === 0) {
+          return res.status(404).json({ message: 'Event not found' });
+        }
+        
+        res.json({ message: 'Event updated successfully' });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    // DELETE event
+    app.delete('/api/events/:id', async (req, res) => {
+      try {
+        const result = await eventsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: 'Event not found' });
+        }
+        res.json({ message: 'Event deleted successfully' });
+      } catch (error) {
+        res.status(500).json({ message: error.message });
+      }
+    });
+
+    // POST join event
+    app.post('/api/events/join/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { userId } = req.body;
+
+        const event = await eventsCollection.findOne({ _id: new ObjectId(id) });
+        if (!event) {
+          return res.status(404).json({ message: 'Event not found' });
+        }
+
+        // Increment attendees count
+        await eventsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $inc: { attendees: 1 } }
+        );
+
+        res.status(201).json({ message: 'Successfully joined event', userId });
       } catch (error) {
         res.status(500).json({ message: error.message });
       }
@@ -285,131 +357,45 @@ async function run() {
       }
     });
 
-    
+
 
     //  STATISTICS ROUTE
-    
+
     app.get('/api/statistics', async (req, res) => {
       try {
-      
         const totalChallenges = await challengesCollection.countDocuments();
-        
-        
+
         const totalParticipants = await challengesCollection.aggregate([
           { $group: { _id: null, total: { $sum: "$participants" } } }
         ]).toArray();
-        
-        
+
         const totalUserChallenges = await userChallengesCollection.countDocuments();
-        
-       
-        const co2Challenges = await userChallengesCollection.aggregate([
-          {
-            $lookup: {
-              from: 'challenges',
-              localField: 'challengeId',
-              foreignField: '_id',
-              as: 'challenge'
-            }
-          },
-          { $unwind: '$challenge' },
-          {
-            $match: {
-              'challenge.category': { $in: ['Energy Conservation', 'Sustainable Transport'] },
-              status: 'Finished'
-            }
-          },
-          {
-            $group: {
-              _id: null,
-              total: { $sum: { $multiply: ['$progress', '$challenge.duration'] } }
-            }
-          }
-        ]).toArray();
-        
-        
-        const plasticChallenges = await userChallengesCollection.aggregate([
-          {
-            $lookup: {
-              from: 'challenges',
-              localField: 'challengeId',
-              foreignField: '_id',
-              as: 'challenge'
-            }
-          },
-          { $unwind: '$challenge' },
-          {
-            $match: {
-              'challenge.category': 'Waste Reduction',
-              status: 'Finished'
-            }
-          },
-          {
-            $group: {
-              _id: null,
-              total: { $sum: { $multiply: ['$progress', '$challenge.duration'] } }
-            }
-          }
-        ]).toArray();
-        
-        
-        const waterChallenges = await userChallengesCollection.aggregate([
-          {
-            $lookup: {
-              from: 'challenges',
-              localField: 'challengeId',
-              foreignField: '_id',
-              as: 'challenge'
-            }
-          },
-          { $unwind: '$challenge' },
-          {
-            $match: {
-              'challenge.category': 'Water Conservation',
-              status: 'Finished'
-            }
-          },
-          {
-            $group: {
-              _id: null,
-              total: { $sum: { $multiply: ['$progress', '$challenge.duration'] } }
-            }
-          }
-        ]).toArray();
-        
-        
-        const treesChallenges = await userChallengesCollection.aggregate([
-          {
-            $lookup: {
-              from: 'challenges',
-              localField: 'challengeId',
-              foreignField: '_id',
-              as: 'challenge'
-            }
-          },
-          { $unwind: '$challenge' },
-          {
-            $match: {
-              'challenge.category': 'Green Living',
-              status: 'Finished'
-            }
-          },
-          {
-            $group: {
-              _id: null,
-              total: { $sum: { $multiply: ['$progress', 0.1] } }
-            }
-          }
-        ]).toArray();
-        
+
+        // Count challenges by category
+        const energyChallenges = await challengesCollection.countDocuments({
+          category: { $in: ['Energy Conservation', 'Sustainable Transport'] }
+        });
+
+        const wasteChallenges = await challengesCollection.countDocuments({
+          category: 'Waste Reduction'
+        });
+
+        const waterChallenges = await challengesCollection.countDocuments({
+          category: 'Water Conservation'
+        });
+
+        const greenChallenges = await challengesCollection.countDocuments({
+          category: 'Green Living'
+        });
+
         res.json({
           totalChallenges,
           totalParticipants: totalParticipants[0]?.total || 0,
           totalUserChallenges,
-          co2Saved: Math.floor((co2Challenges[0]?.total || 0) * 2.5), 
-          plasticReduced: Math.floor((plasticChallenges[0]?.total || 0) * 1.8), 
-          waterSaved: Math.floor((waterChallenges[0]?.total || 0) * 150), 
-          treesPlanted: Math.floor(treesChallenges[0]?.total || 0) 
+          co2Saved: energyChallenges * 2.5,
+          plasticReduced: wasteChallenges * 1.8,
+          waterSaved: waterChallenges * 5,
+          treesPlanted: greenChallenges * 1
         });
       } catch (error) {
         res.status(500).json({ message: error.message });
