@@ -6,8 +6,16 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
+// Middleware 
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'https://eco-track-client-site.web.app/',
+    'https://eco-track-client-site.firebaseapp.com'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // MongoDB Connection
@@ -24,7 +32,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     await client.connect();
-    console.log("Connected to MongoDB!");
+    console.log("✅ Connected to MongoDB!");
 
     const database = client.db("ecoTrackDB");
     const challengesCollection = database.collection("challenges");
@@ -34,27 +42,24 @@ async function run() {
 
     // CHALLENGES ROUTES 
 
-    //  all challenges with (advance filtering)
+    // GET all challenges with advanced filtering
     app.get('/api/challenges', async (req, res) => {
       try {
         const { category, startDate, endDate, minParticipants, maxParticipants } = req.query;
 
         let filter = {};
 
-        // Category filter using $in
         if (category) {
           const categories = category.split(',');
           filter.category = { $in: categories };
         }
 
-        // Date range filtering
         if (startDate || endDate) {
           filter.startDate = {};
           if (startDate) filter.startDate.$gte = new Date(startDate);
           if (endDate) filter.startDate.$lte = new Date(endDate);
         }
 
-        // Participants range filtering
         if (minParticipants || maxParticipants) {
           filter.participants = {};
           if (minParticipants) filter.participants.$gte = parseInt(minParticipants);
@@ -138,7 +143,6 @@ async function run() {
         const { id } = req.params;
         const { userId } = req.body;
 
-        // Check if already joined
         const existing = await userChallengesCollection.findOne({
           userId: userId,
           challengeId: new ObjectId(id)
@@ -148,7 +152,6 @@ async function run() {
           return res.status(400).json({ message: 'Already joined this challenge' });
         }
 
-        // Create user challenge entry
         const userChallenge = {
           userId: userId,
           challengeId: new ObjectId(id),
@@ -159,7 +162,6 @@ async function run() {
 
         await userChallengesCollection.insertOne(userChallenge);
 
-        // Increment participants count
         await challengesCollection.updateOne(
           { _id: new ObjectId(id) },
           { $inc: { participants: 1 } }
@@ -173,13 +175,11 @@ async function run() {
 
     // USER CHALLENGES ROUTES 
 
-    // GET user's challenges
     app.get('/api/user-challenges/:userId', async (req, res) => {
       try {
         const { userId } = req.params;
         const userChallenges = await userChallengesCollection.find({ userId }).toArray();
 
-        // Populate challenge details
         const challengesWithDetails = await Promise.all(
           userChallenges.map(async (uc) => {
             const challenge = await challengesCollection.findOne({ _id: uc.challengeId });
@@ -193,7 +193,6 @@ async function run() {
       }
     });
 
-    // PATCH update user challenge progress
     app.patch('/api/user-challenges/:id', async (req, res) => {
       try {
         const { id } = req.params;
@@ -214,7 +213,7 @@ async function run() {
       }
     });
 
-    //  TIPS ROUTES 
+    // TIPS ROUTES 
 
     app.get('/api/tips', async (req, res) => {
       try {
@@ -250,7 +249,6 @@ async function run() {
       }
     });
 
-    // POST create new event 
     app.post('/api/events', async (req, res) => {
       try {
         const newEvent = {
@@ -266,7 +264,6 @@ async function run() {
       }
     });
 
-    // GET single event
     app.get('/api/events/:id', async (req, res) => {
       try {
         const event = await eventsCollection.findOne({ _id: new ObjectId(req.params.id) });
@@ -279,7 +276,6 @@ async function run() {
       }
     });
 
-    // PATCH update event
     app.patch('/api/events/:id', async (req, res) => {
       try {
         const { id } = req.params;
@@ -301,7 +297,6 @@ async function run() {
       }
     });
 
-    // DELETE event
     app.delete('/api/events/:id', async (req, res) => {
       try {
         const result = await eventsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
@@ -314,7 +309,6 @@ async function run() {
       }
     });
 
-    // POST join event
     app.post('/api/events/join/:id', async (req, res) => {
       try {
         const { id } = req.params;
@@ -325,7 +319,6 @@ async function run() {
           return res.status(404).json({ message: 'Event not found' });
         }
 
-        // Increment attendees count
         await eventsCollection.updateOne(
           { _id: new ObjectId(id) },
           { $inc: { attendees: 1 } }
@@ -336,7 +329,6 @@ async function run() {
         res.status(500).json({ message: error.message });
       }
     });
-
 
     // SLIDES ROUTES
     app.get('/slides', async (req, res) => {
@@ -357,10 +349,7 @@ async function run() {
       }
     });
 
-
-
-    //  STATISTICS ROUTE
-
+    // STATISTICS ROUTE
     app.get('/api/statistics', async (req, res) => {
       try {
         const totalChallenges = await challengesCollection.countDocuments();
@@ -371,7 +360,6 @@ async function run() {
 
         const totalUserChallenges = await userChallengesCollection.countDocuments();
 
-        // Count challenges by category
         const energyChallenges = await challengesCollection.countDocuments({
           category: { $in: ['Energy Conservation', 'Sustainable Transport'] }
         });
@@ -404,7 +392,16 @@ async function run() {
 
     // Root route
     app.get('/', (req, res) => {
-      res.send('EcoTrack API is running!');
+      res.json({ 
+        message: 'EcoTrack API is running!',
+        endpoints: {
+          challenges: '/api/challenges',
+          events: '/api/events',
+          tips: '/api/tips',
+          slides: '/slides',
+          statistics: '/api/statistics'
+        }
+      });
     });
 
   } catch (error) {
