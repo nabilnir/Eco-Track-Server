@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    
+    "start": "node index.js"
   },
   "keywords": [],
   "author": "",
@@ -18,5 +19,13 @@
     "mongodb": "^7.0.0",
     "mongoose": "^8.19.3",
     "react-query": "^3.39.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nabilnir/Eco-Track-Server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nabilnir/Eco-Track-Server/issues"
+  },
+  "homepage": "https://github.com/nabilnir/Eco-Track-Server#readme"
 }
