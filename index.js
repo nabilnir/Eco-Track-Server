@@ -10,7 +10,7 @@ const port = process.env.PORT || 5000;
 app.use(cors({
   origin: [
     'https://eco-track-client-site.web.app/',
-    'https://eco-track-38040.firebaseapp.com',
+    'https://eco-track-b4b76.firebaseapp.com',
     'http://localhost:5173',
     'http://localhost:3000'
   ],
@@ -34,6 +34,9 @@ let challengesCollection;
 let userChallengesCollection;
 let tipsCollection;
 let eventsCollection;
+let testimonialsCollection;
+let blogsCollection;
+let usersCollection;
 
 // Connect to MongoDB once
 async function connectDB() {
@@ -41,12 +44,15 @@ async function connectDB() {
     if (!database) {
       await client.connect();
       console.log("✅ Connected to MongoDB!");
-      
+
       database = client.db("ecoTrackDB");
       challengesCollection = database.collection("challenges");
       userChallengesCollection = database.collection("userChallenges");
       tipsCollection = database.collection("tips");
       eventsCollection = database.collection("events");
+      testimonialsCollection = database.collection("testimonials");
+      blogsCollection = database.collection("blogs");
+      usersCollection = database.collection("users"); // Added users collection
     }
   } catch (error) {
     console.error('MongoDB connection error:', error);
@@ -56,13 +62,15 @@ async function connectDB() {
 
 // Root route
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'EcoTrack API is running!',
     status: 'active',
     endpoints: {
       challenges: '/api/challenges',
       events: '/api/events',
       tips: '/api/tips',
+      testimonials: '/api/testimonials',
+      blogs: '/api/blogs',
       slides: '/slides',
       statistics: '/api/statistics'
     }
@@ -72,32 +80,104 @@ app.get('/', (req, res) => {
 // CHALLENGES ROUTES 
 
 // GET all challenges with advanced filtering
+// GET all challenges with search, sort, pagination, and filters
 app.get('/api/challenges', async (req, res) => {
   try {
     await connectDB();
-    const { category, startDate, endDate, minParticipants, maxParticipants } = req.query;
+    const {
+      category,
+      startDate,
+      endDate,
+      minParticipants,
+      maxParticipants,
+      search,
+      sort,
+      page = 1,
+      limit = 12
+    } = req.query;
 
     let filter = {};
 
+    // 1. Category Filter
     if (category) {
       const categories = category.split(',');
       filter.category = { $in: categories };
     }
 
+    // 2. Date Range Filter
     if (startDate || endDate) {
       filter.startDate = {};
       if (startDate) filter.startDate.$gte = new Date(startDate);
       if (endDate) filter.startDate.$lte = new Date(endDate);
     }
 
+    // 3. Participants Filter
     if (minParticipants || maxParticipants) {
       filter.participants = {};
       if (minParticipants) filter.participants.$gte = parseInt(minParticipants);
       if (maxParticipants) filter.participants.$lte = parseInt(maxParticipants);
     }
 
-    const challenges = await challengesCollection.find(filter).toArray();
-    res.json(challenges);
+    // 4. Search (Title or Description)
+    if (search) {
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // 5. Sorting
+    let sortOptions = {};
+    if (sort) {
+      switch (sort) {
+        case 'newest':
+          sortOptions = { createdAt: -1 };
+          break;
+        case 'oldest':
+          sortOptions = { createdAt: 1 };
+          break;
+        case 'participants_desc':
+          sortOptions = { participants: -1 };
+          break;
+        case 'duration_asc':
+          sortOptions = { duration: 1 };
+          break;
+        default:
+          sortOptions = { createdAt: -1 }; // Default
+      }
+    } else {
+      sortOptions = { createdAt: -1 };
+    }
+
+    // 6. Pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Execute Query
+    const challenges = await challengesCollection
+      .find(filter)
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(limitNum)
+      .toArray();
+
+    // Get Total Count for Pagination
+    const total = await challengesCollection.countDocuments(filter);
+
+    // Return Structured Response
+    res.json({
+      challenges,
+      pagination: {
+        currentPage: pageNum,
+        totalPages: Math.ceil(total / limitNum),
+        totalItems: total,
+        itemsPerPage: limitNum
+      },
+      // Keep root keys for easier client access if needed (optional but helpful)
+      totalPages: Math.ceil(total / limitNum)
+    });
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -203,6 +283,44 @@ app.post('/api/challenges/join/:id', async (req, res) => {
     );
 
     res.status(201).json({ message: 'Successfully joined challenge', userChallenge });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// USER DATA ROUTES (NEW)
+app.post('/api/users', async (req, res) => {
+  try {
+    await connectDB();
+    const user = req.body;
+    const query = { email: user.email };
+
+    // Check if user exists
+    const existingUser = await usersCollection.findOne(query);
+    if (existingUser) {
+      return res.json({ message: 'User already exists', user: existingUser });
+    }
+
+    const result = await usersCollection.insertOne({
+      ...user,
+      createdAt: new Date(),
+      role: user.role || 'user'
+    });
+    res.json({ message: 'User created successfully', result });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/users/:email', async (req, res) => {
+  try {
+    await connectDB();
+    const email = req.params.email;
+    const user = await usersCollection.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -324,16 +442,16 @@ app.patch('/api/events/:id', async (req, res) => {
     const { id } = req.params;
     const updateData = { ...req.body, updatedAt: new Date() };
     delete updateData._id;
-    
+
     const result = await eventsCollection.updateOne(
       { _id: new ObjectId(id) },
       { $set: updateData }
     );
-    
+
     if (result.matchedCount === 0) {
       return res.status(404).json({ message: 'Event not found' });
     }
-    
+
     res.json({ message: 'Event updated successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -375,22 +493,241 @@ app.post('/api/events/join/:id', async (req, res) => {
   }
 });
 
-// SLIDES ROUTES
-app.get('/slides', async (req, res) => {
+// TESTIMONIALS ROUTES
+
+app.get('/api/testimonials', async (req, res) => {
   try {
     await connectDB();
-    const slides = await database.collection('slides').find({}).toArray();
-    res.json(slides);
+    const testimonials = await testimonialsCollection.find({}).sort({ createdAt: -1 }).toArray();
+    res.json(testimonials);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 });
 
-app.post('/slides', async (req, res) => {
+app.post('/api/testimonials', async (req, res) => {
   try {
     await connectDB();
-    const result = await database.collection('slides').insertOne(req.body);
-    res.json(result);
+    const newTestimonial = {
+      ...req.body,
+      rating: req.body.rating || 5,
+      featured: req.body.featured || false,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    const result = await testimonialsCollection.insertOne(newTestimonial);
+    res.status(201).json({ insertedId: result.insertedId, ...newTestimonial });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.patch('/api/testimonials/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const { id } = req.params;
+    const updateData = { ...req.body, updatedAt: new Date() };
+    delete updateData._id;
+
+    const result = await testimonialsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: 'Testimonial not found' });
+    }
+
+    res.json({ message: 'Testimonial updated successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.delete('/api/testimonials/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const result = await testimonialsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: 'Testimonial not found' });
+    }
+    res.json({ message: 'Testimonial deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// BLOGS ROUTES
+
+app.get('/api/blogs', async (req, res) => {
+  try {
+    await connectDB();
+    const { limit = 10, page = 1, category, authorEmail } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    let filter = {};
+    if (category) {
+      filter.category = category;
+    }
+    if (authorEmail) {
+      filter.authorEmail = authorEmail;
+    }
+
+    const blogs = await blogsCollection
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .toArray();
+
+    const total = await blogsCollection.countDocuments(filter);
+
+    res.json({
+      blogs,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/blogs/latest', async (req, res) => {
+  try {
+    await connectDB();
+    const { limit = 3 } = req.query;
+
+    const blogs = await blogsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .toArray();
+
+    res.json(blogs);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.get('/api/blogs/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const blog = await blogsCollection.findOne({ _id: new ObjectId(req.params.id) });
+    if (!blog) {
+      return res.status(404).json({ message: 'Blog not found' });
+    }
+
+    // Increment view count
+    await blogsCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $inc: { views: 1 } }
+    );
+
+    // Return blog with updated view count
+    const updatedBlog = await blogsCollection.findOne({ _id: new ObjectId(req.params.id) });
+    res.json(updatedBlog);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.post('/api/blogs', async (req, res) => {
+  try {
+    await connectDB();
+    const newBlog = {
+      ...req.body,
+      views: 0,
+      likes: 0,
+      comments: [],
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    const result = await blogsCollection.insertOne(newBlog);
+    res.status(201).json({ insertedId: result.insertedId, ...newBlog });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.patch('/api/blogs/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const { id } = req.params;
+    const updateData = { ...req.body, updatedAt: new Date() };
+    delete updateData._id;
+
+    const result = await blogsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: 'Blog not found' });
+    }
+
+    res.json({ message: 'Blog updated successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.delete('/api/blogs/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const result = await blogsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: 'Blog not found' });
+    }
+    res.json({ message: 'Blog deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.post('/api/blogs/:id/like', async (req, res) => {
+  try {
+    await connectDB();
+    const result = await blogsCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $inc: { likes: 1 } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: 'Blog not found' });
+    }
+
+    res.json({ message: 'Blog liked successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.post('/api/blogs/:id/comment', async (req, res) => {
+  try {
+    await connectDB();
+    const { userId, username, content } = req.body;
+
+    const comment = {
+      userId,
+      username,
+      content,
+      createdAt: new Date()
+    };
+
+    const result = await blogsCollection.updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $push: { comments: comment } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: 'Blog not found' });
+    }
+
+    res.status(201).json({ message: 'Comment added successfully', comment });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
