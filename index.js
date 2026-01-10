@@ -326,6 +326,54 @@ app.get('/api/users/:email', async (req, res) => {
   }
 });
 
+// GET all users (for admin dashboard)
+app.get('/api/users', async (req, res) => {
+  try {
+    await connectDB();
+    const users = await usersCollection.find().toArray();
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// PATCH update user (role, status, etc.)
+app.patch('/api/users/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const { id } = req.params;
+    const updateData = { ...req.body, updatedAt: new Date() };
+    delete updateData._id; // Prevent updating _id
+
+    const result = await usersCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({ message: 'User updated successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// DELETE user
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    await connectDB();
+    const result = await usersCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // USER CHALLENGES ROUTES 
 
 app.get('/api/user-challenges/:userId', async (req, res) => {
