@@ -9,9 +9,10 @@ const port = process.env.PORT || 5000;
 // Middleware 
 app.use(cors({
   origin: [
-    'https://eco-track-client-site.web.app/',
+    'https://eco-track-client-site.web.app',
     'https://eco-track-b4b76.firebaseapp.com',
     'http://localhost:5173',
+    'http://localhost:5177',
     'http://localhost:3000'
   ],
   credentials: true
