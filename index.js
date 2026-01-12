@@ -35,8 +35,8 @@ let challengesCollection;
 let userChallengesCollection;
 let tipsCollection;
 let eventsCollection;
+let userEventsCollection; // New collection
 let testimonialsCollection;
-let blogsCollection;
 let usersCollection;
 
 // Connect to MongoDB once
@@ -51,8 +51,8 @@ async function connectDB() {
       userChallengesCollection = database.collection("userChallenges");
       tipsCollection = database.collection("tips");
       eventsCollection = database.collection("events");
+      userEventsCollection = database.collection("userEvents"); // Initialize
       testimonialsCollection = database.collection("testimonials");
-      blogsCollection = database.collection("blogs");
       usersCollection = database.collection("users"); // Added users collection
     }
   } catch (error) {
@@ -71,7 +71,6 @@ app.get('/', (req, res) => {
       events: '/api/events',
       tips: '/api/tips',
       testimonials: '/api/testimonials',
-      blogs: '/api/blogs',
       slides: '/slides',
       statistics: '/api/statistics'
     }
@@ -526,17 +525,58 @@ app.post('/api/events/join/:id', async (req, res) => {
     const { id } = req.params;
     const { userId } = req.body;
 
+    // Check if user already joined
+    const existing = await userEventsCollection.findOne({
+      userId: userId,
+      eventId: new ObjectId(id)
+    });
+
+    if (existing) {
+      return res.status(400).json({ message: 'Already joined this event' });
+    }
+
     const event = await eventsCollection.findOne({ _id: new ObjectId(id) });
     if (!event) {
       return res.status(404).json({ message: 'Event not found' });
     }
 
+    // Insert into userEvents
+    const userEvent = {
+      userId: userId, // Assuming email is passed as userId based on frontend code
+      eventId: new ObjectId(id),
+      joinDate: new Date()
+    };
+
+    await userEventsCollection.insertOne(userEvent);
+
+    // Increment attendees
     await eventsCollection.updateOne(
       { _id: new ObjectId(id) },
       { $inc: { attendees: 1 } }
     );
 
     res.status(201).json({ message: 'Successfully joined event', userId });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// GET joined events for a user
+app.get('/api/user-events/:userId', async (req, res) => {
+  try {
+    await connectDB();
+    const { userId } = req.params;
+    // userId is email in this app context
+    const userEvents = await userEventsCollection.find({ userId }).toArray();
+
+    const eventsWithDetails = await Promise.all(
+      userEvents.map(async (ue) => {
+        const event = await eventsCollection.findOne({ _id: ue.eventId });
+        return { ...ue, event };
+      })
+    );
+
+    res.json(eventsWithDetails);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -606,181 +646,6 @@ app.delete('/api/testimonials/:id', async (req, res) => {
   }
 });
 
-// BLOGS ROUTES
-
-app.get('/api/blogs', async (req, res) => {
-  try {
-    await connectDB();
-    const { limit = 10, page = 1, category, authorEmail } = req.query;
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    let filter = {};
-    if (category) {
-      filter.category = category;
-    }
-    if (authorEmail) {
-      filter.authorEmail = authorEmail;
-    }
-
-    const blogs = await blogsCollection
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit))
-      .toArray();
-
-    const total = await blogsCollection.countDocuments(filter);
-
-    res.json({
-      blogs,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-app.get('/api/blogs/latest', async (req, res) => {
-  try {
-    await connectDB();
-    const { limit = 3 } = req.query;
-
-    const blogs = await blogsCollection
-      .find({})
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit))
-      .toArray();
-
-    res.json(blogs);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-app.get('/api/blogs/:id', async (req, res) => {
-  try {
-    await connectDB();
-    const blog = await blogsCollection.findOne({ _id: new ObjectId(req.params.id) });
-    if (!blog) {
-      return res.status(404).json({ message: 'Blog not found' });
-    }
-
-    // Increment view count
-    await blogsCollection.updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $inc: { views: 1 } }
-    );
-
-    // Return blog with updated view count
-    const updatedBlog = await blogsCollection.findOne({ _id: new ObjectId(req.params.id) });
-    res.json(updatedBlog);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-app.post('/api/blogs', async (req, res) => {
-  try {
-    await connectDB();
-    const newBlog = {
-      ...req.body,
-      views: 0,
-      likes: 0,
-      comments: [],
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    const result = await blogsCollection.insertOne(newBlog);
-    res.status(201).json({ insertedId: result.insertedId, ...newBlog });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-app.patch('/api/blogs/:id', async (req, res) => {
-  try {
-    await connectDB();
-    const { id } = req.params;
-    const updateData = { ...req.body, updatedAt: new Date() };
-    delete updateData._id;
-
-    const result = await blogsCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: updateData }
-    );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ message: 'Blog not found' });
-    }
-
-    res.json({ message: 'Blog updated successfully' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-app.delete('/api/blogs/:id', async (req, res) => {
-  try {
-    await connectDB();
-    const result = await blogsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ message: 'Blog not found' });
-    }
-    res.json({ message: 'Blog deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-app.post('/api/blogs/:id/like', async (req, res) => {
-  try {
-    await connectDB();
-    const result = await blogsCollection.updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $inc: { likes: 1 } }
-    );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ message: 'Blog not found' });
-    }
-
-    res.json({ message: 'Blog liked successfully' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-app.post('/api/blogs/:id/comment', async (req, res) => {
-  try {
-    await connectDB();
-    const { userId, username, content } = req.body;
-
-    const comment = {
-      userId,
-      username,
-      content,
-      createdAt: new Date()
-    };
-
-    const result = await blogsCollection.updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $push: { comments: comment } }
-    );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ message: 'Blog not found' });
-    }
-
-    res.status(201).json({ message: 'Comment added successfully', comment });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
 
 // STATISTICS ROUTE
 app.get('/api/statistics', async (req, res) => {
@@ -793,6 +658,9 @@ app.get('/api/statistics', async (req, res) => {
     ]).toArray();
 
     const totalUserChallenges = await userChallengesCollection.countDocuments();
+
+    const totalUsers = await usersCollection.countDocuments();
+    const totalEvents = await eventsCollection.countDocuments();
 
     const energyChallenges = await challengesCollection.countDocuments({
       category: { $in: ['Energy Conservation', 'Sustainable Transport'] }
@@ -814,6 +682,8 @@ app.get('/api/statistics', async (req, res) => {
       totalChallenges,
       totalParticipants: totalParticipants[0]?.total || 0,
       totalUserChallenges,
+      totalUsers,
+      totalEvents,
       co2Saved: energyChallenges * 2.5,
       plasticReduced: wasteChallenges * 1.8,
       waterSaved: waterChallenges * 5,
