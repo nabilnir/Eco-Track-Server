@@ -17,7 +17,8 @@ app.use(cors({
   ],
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increased limit for base64 images
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // MongoDB Connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@ecotrack0.zoz8wuc.mongodb.net/?appName=EcoTrack0`;
@@ -360,6 +361,38 @@ app.patch('/api/users/:id', async (req, res) => {
   }
 });
 
+// PUT update user profile (by email)
+app.put('/api/users/profile/:email', async (req, res) => {
+  try {
+    await connectDB();
+    const { email } = req.params;
+    const { displayName, bio, photoURL, coverPhotoURL } = req.body;
+
+    const updateData = {
+      updatedAt: new Date()
+    };
+
+    if (displayName !== undefined) updateData.displayName = displayName;
+    if (bio !== undefined) updateData.bio = bio;
+    if (photoURL !== undefined) updateData.photoURL = photoURL;
+    if (coverPhotoURL !== undefined) updateData.coverPhotoURL = coverPhotoURL;
+
+    const result = await usersCollection.updateOne(
+      { email },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const updatedUser = await usersCollection.findOne({ email });
+    res.json({ message: 'Profile updated successfully', user: updatedUser });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // DELETE user
 app.delete('/api/users/:id', async (req, res) => {
   try {
@@ -678,6 +711,36 @@ app.get('/api/statistics', async (req, res) => {
       category: 'Green Living'
     });
 
+    // Growth Logic (Mocked logic for demo purposes if real historical data isn't easily queryable without created timestamps on everything, 
+    // but assuming createdAt exists on users and userChallenges)
+    const now = new Date();
+    const firstDayCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+    // User Growth
+    const currentMonthUsers = await usersCollection.countDocuments({ createdAt: { $gte: firstDayCurrentMonth } });
+    const lastMonthUsers = await usersCollection.countDocuments({
+      createdAt: { $gte: firstDayLastMonth, $lt: firstDayCurrentMonth }
+    });
+
+    // Avoid division by zero
+    const previousTotalUsers = totalUsers - currentMonthUsers;
+    // Simplified calculation for "growth based on recent additions relative to total" or just month-over-month new users
+    // Let's do month-over-month growth of *total base* if possible, or just user acquisition rate.
+    // Let's try to do (New Users This Month - New Users Last Month) / New Users Last Month for "Growth in Rate" OR
+    // (Total Now - Total Last Month) / Total Last Month.
+    // Let's go with (Current Month New Users) vs (Last Month New Users) trend ?? 
+    // Actually typically stats cards show "vs last month" meaning % increase in total count over last month?
+    // Let's just do: ((currentMonthUsers) / (totalUsers - currentMonthUsers)) * 100 approx?
+    // Let's stick to safe math:
+    const userGrowth = previousTotalUsers > 0 ? ((currentMonthUsers / previousTotalUsers) * 100).toFixed(1) : 0;
+
+    // Activity Growth
+    const currentMonthActivities = await userChallengesCollection.countDocuments({ joinDate: { $gte: firstDayCurrentMonth } }); // Assuming joinDate for activities
+    const previousTotalActivities = totalUserChallenges - currentMonthActivities;
+    const activityGrowth = previousTotalActivities > 0 ? ((currentMonthActivities / previousTotalActivities) * 100).toFixed(1) : 0;
+
+
     res.json({
       totalChallenges,
       totalParticipants: totalParticipants[0]?.total || 0,
@@ -687,9 +750,240 @@ app.get('/api/statistics', async (req, res) => {
       co2Saved: energyChallenges * 2.5,
       plasticReduced: wasteChallenges * 1.8,
       waterSaved: waterChallenges * 5,
-      treesPlanted: greenChallenges * 1
+      treesPlanted: greenChallenges * 1,
+      userGrowth,
+      activityGrowth
     });
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+
+
+// DASHBOARD CHARTS ROUTES
+app.get('/api/dashboard/charts', async (req, res) => {
+  try {
+    await connectDB();
+
+    // 1. Monthly Data (Last 6 months)
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      months.push({
+        monthName: d.toLocaleString('default', { month: 'short' }),
+        monthIndex: d.getMonth(),
+        year: d.getFullYear()
+      });
+    }
+
+    const monthlyDataPromises = months.map(async (m) => {
+      const start = new Date(m.year, m.monthIndex, 1);
+      const end = new Date(m.year, m.monthIndex + 1, 0); // Last day of month
+
+      const userCount = await usersCollection.countDocuments({
+        createdAt: { $lte: end } // Cumulative
+      });
+
+      const activityCount = await userChallengesCollection.countDocuments({
+        joinDate: { $lte: end } // Cumulative
+      });
+
+      return {
+        month: m.monthName,
+        users: userCount,
+        activities: activityCount
+      };
+    });
+
+    const monthlyData = await Promise.all(monthlyDataPromises);
+
+    // 2. Category Data (Pie Chart)
+    const categoryAggregation = await challengesCollection.aggregate([
+      { $group: { _id: "$category", count: { $sum: 1 } } }
+    ]).toArray();
+
+    const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+    const categoryData = categoryAggregation.map((cat, index) => ({
+      name: cat._id,
+      value: cat.count,
+      color: COLORS[index % COLORS.length]
+    }));
+
+    // 3. Weekly Activity Trend (Last 7 days)
+    const last7Days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      last7Days.push(d);
+    }
+
+    const activityDataPromises = last7Days.map(async (date) => {
+      const start = new Date(date);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(date);
+      end.setHours(23, 59, 59, 999);
+
+      const count = await userChallengesCollection.countDocuments({
+        joinDate: { $gte: start, $lte: end } // Daily count
+      });
+
+      return {
+        day: date.toLocaleDateString('en-US', { weekday: 'short' }),
+        count: count
+      };
+    });
+
+    const activityData = await Promise.all(activityDataPromises);
+
+    res.json({
+      monthlyData,
+      categoryData,
+      activityData
+    });
+
+  } catch (error) {
+    console.error("Chart data error:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+
+
+// USER DASHBOARD STATS
+app.get('/api/dashboard/user-stats', async (req, res) => {
+  try {
+    await connectDB();
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ message: 'Email required' });
+
+    // 1. My Challenges (All joined challenges)
+    const myChallengesCount = await userChallengesCollection.countDocuments({ userId: email });
+
+    // 2. My Events (All joined events)
+    // The user asked for "total number of events the user joined", likely all, not just upcoming.
+    const myEventsCount = await userEventsCollection.countDocuments({ userId: email });
+
+    // 3. My Total Activities (Sum of both)
+    const totalActivities = myChallengesCount + myEventsCount;
+
+    // Growth check (Activity Growth for challenges)
+    const now = new Date();
+    const firstDayCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const currentMonthChallenges = await userChallengesCollection.countDocuments({
+      userId: email,
+      joinDate: { $gte: firstDayCurrentMonth }
+    });
+    const priorChallenges = myChallengesCount - currentMonthChallenges;
+    const activityGrowth = priorChallenges > 0 ? ((currentMonthChallenges / priorChallenges) * 100).toFixed(1) : 0;
+
+    res.json({
+      totalActivities,      // Sum
+      myChallengesCount,    // Challenges
+      myEventsCount,        // Events
+      activityGrowth
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// USER DASHBOARD CHARTS
+app.get('/api/dashboard/user-charts', async (req, res) => {
+  try {
+    await connectDB();
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ message: 'Email required' });
+
+    // 1. Monthly Data (Last 6 months) for User
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      months.push({
+        monthName: d.toLocaleString('default', { month: 'short' }),
+        monthIndex: d.getMonth(),
+        year: d.getFullYear()
+      });
+    }
+
+    const monthlyDataPromises = months.map(async (m) => {
+      const end = new Date(m.year, m.monthIndex + 1, 0);
+
+      const activityCount = await userChallengesCollection.countDocuments({
+        userId: email,
+        joinDate: { $lte: end }
+      });
+
+      return {
+        month: m.monthName,
+        activities: activityCount,
+        users: 0 // Not relevant for user dashboard
+      };
+    });
+
+    const monthlyData = await Promise.all(monthlyDataPromises);
+
+    // 2. Category Data (Pie Chart) - Need to join with challenges to get category
+    // Using aggregation with lookup
+    const categoryAggregation = await userChallengesCollection.aggregate([
+      { $match: { userId: email } },
+      {
+        $lookup: {
+          from: 'challenges',
+          localField: 'challengeId',
+          foreignField: '_id',
+          as: 'challengeDetails'
+        }
+      },
+      { $unwind: '$challengeDetails' },
+      { $group: { _id: '$challengeDetails.category', count: { $sum: 1 } } }
+    ]).toArray();
+
+    const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+    const categoryData = categoryAggregation.map((cat, index) => ({
+      name: cat._id,
+      value: cat.count,
+      color: COLORS[index % COLORS.length]
+    }));
+
+    // 3. Weekly Activity Trend (Last 7 days)
+    const last7Days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      last7Days.push(d);
+    }
+
+    const activityDataPromises = last7Days.map(async (date) => {
+      const start = new Date(date);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(date);
+      end.setHours(23, 59, 59, 999);
+
+      const count = await userChallengesCollection.countDocuments({
+        userId: email,
+        joinDate: { $gte: start, $lte: end }
+      });
+
+      return {
+        day: date.toLocaleDateString('en-US', { weekday: 'short' }),
+        count: count
+      };
+    });
+
+    const activityData = await Promise.all(activityDataPromises);
+
+    res.json({
+      monthlyData,
+      categoryData,
+      activityData
+    });
+
+  } catch (error) {
+    console.error("User chart data error:", error);
     res.status(500).json({ message: error.message });
   }
 });
