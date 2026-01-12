@@ -760,8 +760,156 @@ app.get('/api/statistics', async (req, res) => {
 });
 
 
+// ADMIN DASHBOARD STATS ROUTE
+app.get('/api/admin/stats', async (req, res) => {
+  try {
+    await connectDB();
 
-// DASHBOARD CHARTS ROUTES
+    // Challenge Stats
+    const totalChallenges = await challengesCollection.countDocuments();
+    const activeChallenges = await challengesCollection.countDocuments({
+      startDate: { $lte: new Date() },
+      endDate: { $gte: new Date() }
+    });
+
+    // User Stats
+    const totalUsers = await usersCollection.countDocuments();
+    const activeUsers = await usersCollection.countDocuments({ status: 'active' });
+    const suspendedUsers = await usersCollection.countDocuments({ status: 'suspended' });
+    const adminUsers = await usersCollection.countDocuments({ role: 'admin' });
+
+    // Event Stats
+    const totalEvents = await eventsCollection.countDocuments();
+    const upcomingEvents = await eventsCollection.countDocuments({
+      date: { $gte: new Date() }
+    });
+
+    // Participation Stats
+    const totalParticipations = await userChallengesCollection.countDocuments();
+    const totalEventAttendees = await userEventsCollection.countDocuments();
+
+    // Category breakdown for challenges
+    const categoryStats = await challengesCollection.aggregate([
+      { $group: { _id: "$category", count: { $sum: 1 } } }
+    ]).toArray();
+
+    // Growth calculations
+    const now = new Date();
+    const firstDayCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const currentMonthUsers = await usersCollection.countDocuments({ createdAt: { $gte: firstDayCurrentMonth } });
+    const previousTotalUsers = totalUsers - currentMonthUsers;
+    const userGrowth = previousTotalUsers > 0 ? ((currentMonthUsers / previousTotalUsers) * 100).toFixed(1) : 0;
+
+    const currentMonthParticipations = await userChallengesCollection.countDocuments({ joinDate: { $gte: firstDayCurrentMonth } });
+    const previousTotalParticipations = totalParticipations - currentMonthParticipations;
+    const participationGrowth = previousTotalParticipations > 0 ? ((currentMonthParticipations / previousTotalParticipations) * 100).toFixed(1) : 0;
+
+    // Environmental Impact (based on challenge categories)
+    const energyChallenges = await challengesCollection.countDocuments({
+      category: { $in: ['Energy Conservation', 'Sustainable Transport'] }
+    });
+    const wasteChallenges = await challengesCollection.countDocuments({ category: 'Waste Reduction' });
+    const waterChallenges = await challengesCollection.countDocuments({ category: 'Water Conservation' });
+    const greenChallenges = await challengesCollection.countDocuments({ category: 'Green Living' });
+
+    res.json({
+      success: true,
+      data: {
+        challenges: {
+          total: totalChallenges,
+          active: activeChallenges,
+          categories: categoryStats
+        },
+        users: {
+          total: totalUsers,
+          active: activeUsers,
+          suspended: suspendedUsers,
+          admins: adminUsers,
+          growth: parseFloat(userGrowth)
+        },
+        events: {
+          total: totalEvents,
+          upcoming: upcomingEvents
+        },
+        participation: {
+          challenges: totalParticipations,
+          events: totalEventAttendees,
+          total: totalParticipations + totalEventAttendees,
+          growth: parseFloat(participationGrowth)
+        },
+        impact: {
+          co2Saved: (energyChallenges * 2.5).toFixed(1),
+          plasticReduced: (wasteChallenges * 1.8).toFixed(1),
+          waterSaved: (waterChallenges * 5).toFixed(1),
+          treesPlanted: greenChallenges
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ADMIN DASHBOARD LATEST DATA ROUTE
+app.get('/api/admin/latest', async (req, res) => {
+  try {
+    await connectDB();
+
+    // Latest 5 users
+    const latestUsers = await usersCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .toArray();
+
+    // Latest 5 challenges
+    const latestChallenges = await challengesCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .toArray();
+
+    // Latest 5 events
+    const latestEvents = await eventsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .toArray();
+
+    // Latest 5 challenge participations with user and challenge details
+    const latestParticipations = await userChallengesCollection
+      .find({})
+      .sort({ joinDate: -1 })
+      .limit(5)
+      .toArray();
+
+    // Enrich participations with challenge details
+    const enrichedParticipations = await Promise.all(
+      latestParticipations.map(async (p) => {
+        const challenge = await challengesCollection.findOne({ _id: p.challengeId });
+        return {
+          ...p,
+          challenge: challenge ? { title: challenge.title, category: challenge.category } : null
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: {
+        latestUsers,
+        latestChallenges,
+        latestEvents,
+        latestParticipations: enrichedParticipations
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+
 app.get('/api/dashboard/charts', async (req, res) => {
   try {
     await connectDB();
